@@ -10,12 +10,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # LLM
-MODEL_NAME: str = os.getenv("CONTRACT_REVIEWER_MODEL", "gpt-4o-mini")
+MODEL_NAME: str = os.getenv("CONTRACT_REVIEWER_MODEL", "gpt-5.4-mini")
 OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL: str | None = os.getenv("OPENAI_BASE_URL")  # optional, for compatible APIs
 
 # Chunking
-MAX_CHUNK_CHARS: int = int(os.getenv("CONTRACT_REVIEWER_MAX_CHUNK", "12000"))
+MAX_CHUNK_CHARS: int = int(os.getenv("CONTRACT_REVIEWER_MAX_CHUNK", "6000"))
 
 # Files
 _output_env = os.getenv("CONTRACT_REVIEWER_OUTPUT_DIR", "").strip()

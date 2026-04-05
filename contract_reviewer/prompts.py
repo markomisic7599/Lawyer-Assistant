@@ -17,15 +17,28 @@ DOC_SUMMARY_TITLE: dict[str, str] = {
     LANG_SR_LATIN: "Rezime pregleda ugovora",
 }
 
-REVIEW_SYSTEM_PROMPT_CORE = """You are a careful legal drafting assistant. You review contract language for clarity, fairness, and common risk patterns. You do not give final legal advice; you flag items a lawyer may want to review.
+REVIEW_SYSTEM_PROMPT_CORE = """You are a careful contract-review assistant helping a lawyer do a first-pass review of draft agreements.
+
+Your job is to identify clauses that are ambiguous, commercially one-sided, operationally risky, unusually broad, missing objective standards, or likely to create later disputes. You do not give final legal advice. You flag drafting issues a lawyer may want to revise or negotiate.
 
 Respond ONLY with valid JSON (no markdown fences, no commentary). The JSON must be an array of objects, each with exactly these keys:
-- "clause_text": string — copy the shortest exact substring from the provided contract excerpt that identifies the issue (must appear verbatim in the excerpt; same script and spelling as in the document).
-- "issue_type": string — short label for the kind of issue (see language rules below).
-- "severity": string — one of "low", "medium", "high" (always these English tokens, lowercase).
-- "suggestion": string — concise improved wording or negotiation point for the lawyer (see language rules below).
+- "clause_text": string — copy the shortest exact substring from the provided contract excerpt that identifies the issue. It must appear verbatim in the excerpt.
+- "issue_type": string — short label for the issue.
+- "severity": string — one of "low", "medium", "high".
+- "suggestion": string — a practical reviewer note written as ONE string in this exact structure:
+  "Why flagged: ... | Risk: ... | Better wording: ... | Negotiation fallback: ..."
 
-If there are no issues in an excerpt, return an empty array [].
+Rules:
+- Be specific to the exact clause, not generic.
+- Prefer concrete replacement wording over abstract advice.
+- Explain who benefits from the current wording and who bears the risk when relevant.
+- If the clause is vague, propose a measurable or objective alternative.
+- If the clause is one-sided, say what mutual or narrower alternative would be fairer.
+- Do not repeat the full clause_text inside suggestion unless necessary.
+- Do not output duplicate issues for the same root problem.
+- Ignore minor stylistic improvements unless they affect meaning, enforceability, allocation of risk, payment, acceptance, termination, liability, indemnity, confidentiality, IP, data protection, renewal, governing law, dispute resolution, audit, assignment, subcontracting, or service levels.
+
+If there are no meaningful issues in an excerpt, return [].
 """
 
 LANGUAGE_RULES: dict[str, str] = {
@@ -50,23 +63,49 @@ def build_system_prompt(language: str) -> str:
 
 def build_user_prompt_for_chunk(chunk_text: str, mode: str, language: str) -> str:
     mode_hint = {
-        "strict": "Be thorough; flag even minor ambiguities and stylistic risks.",
-        "balanced": "Flag meaningful risks and unclear language; skip nitpicks.",
-        "light": "Only flag high-impact or clearly problematic clauses.",
-    }.get(mode, "Flag meaningful risks and unclear language; skip nitpicks.")
+        "strict": (
+            "Be thorough. Review for ambiguity, undefined standards, one-sided risk allocation, "
+            "unlimited liability, broad indemnities, vague payment terms, weak acceptance language, "
+            "discretionary termination rights, overbroad confidentiality, automatic renewal issues, "
+            "IP ownership uncertainty, missing data-protection limits, weak force majeure triggers, "
+            "and dispute-risk wording."
+        ),
+        "balanced": (
+            "Focus on meaningful legal and commercial risks. Flag clauses that are materially unclear, "
+            "one-sided, unusually broad, hard to operate in practice, or likely to cause disputes."
+        ),
+        "light": (
+            "Only flag clearly material legal or commercial issues, not stylistic points."
+        ),
+    }.get(mode, "Focus on meaningful legal and commercial risks.")
 
     lang = language if language in VALID_LANGUAGES else LANG_EN
     if lang == LANG_SR_LATIN:
         mode_hint_sr = {
-            "strict": "Budi temeljan; označi i manje dvosmislenosti i stilske rizike.",
-            "balanced": "Označi smislene rizike i nejasan jezik; izbegni sitničarenje.",
-            "light": "Označi samo visok uticaj ili očigledno problematične klauzule.",
+            "strict": (
+                "Budi veoma temeljan. Proveri dvosmislenost, neobjektivne standarde, jednostranu raspodelu rizika, "
+                "neograničenu odgovornost, široke odštetne obaveze, nejasne uslove plaćanja, slabo definisano prihvatanje usluge, "
+                "diskreciono pravo raskida, preširoku poverljivost, automatsko produženje, nejasno vlasništvo nad IP, "
+                "slabe granice obrade podataka, nejasnu višu silu i formulacije koje lako vode sporu."
+            ),
+            "balanced": (
+                "Fokusiraj se na bitne pravne i komercijalne rizike. Označi klauzule koje su materijalno nejasne, "
+                "jednostrane, preširoke, teško primenljive u praksi ili verovatno vode sporu."
+            ),
+            "light": (
+                "Označi samo jasno materijalne pravne ili komercijalne probleme, ne stilske sitnice."
+            ),
         }.get(mode, mode_hint)
         mode_line = f"Režim pregleda: {mode}\n{mode_hint_sr}"
     else:
         mode_line = f"Review mode: {mode}\n{mode_hint}"
 
     return f"""{mode_line}
+
+Additional instructions:
+- Prefer the most material issue if multiple issues overlap.
+- For each issue, suggestion must include:
+  Why flagged, Risk, Better wording, Negotiation fallback.
 
 Contract excerpt (verbatim from the document):
 ---
