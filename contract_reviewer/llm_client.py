@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from typing import Any
 
 from openai import OpenAI
 
 from . import prompts, settings
+from .logging_setup import ensure_logging
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_model_output(raw: str) -> list[dict[str, Any]]:
@@ -50,30 +55,70 @@ def _client() -> OpenAI:
     return OpenAI(**kwargs)
 
 
-def review_clause(text: str, mode: str) -> list[dict[str, Any]]:
+def review_clause(
+    text: str,
+    mode: str,
+    language: str = prompts.LANG_EN,
+) -> list[dict[str, Any]]:
     """Review a single clause/excerpt; returns normalized issue dicts."""
-    return review_document([text], mode)
+    return review_document([text], mode, language=language)
 
 
-def review_document(chunks: list[str], mode: str) -> list[dict[str, Any]]:
+def review_document(
+    chunks: list[str],
+    mode: str,
+    *,
+    language: str = prompts.LANG_EN,
+) -> list[dict[str, Any]]:
     """
     Send each chunk to the model with the review prompt; concatenate parsed issues.
     """
+    ensure_logging()
     client = _client()
     all_issues: list[dict[str, Any]] = []
     total = len(chunks)
+    lang = language if language in prompts.VALID_LANGUAGES else prompts.LANG_EN
+    system_prompt = prompts.build_system_prompt(lang)
+    logger.info(
+        "LLM: model=%s base_url=%s chunk_count=%s mode=%s language=%s",
+        settings.MODEL_NAME,
+        settings.OPENAI_BASE_URL or "(default OpenAI)",
+        total,
+        mode,
+        lang,
+    )
     for i, chunk in enumerate(chunks):
         if not chunk.strip():
+            logger.info("LLM: skipping empty chunk %s/%s", i + 1, total)
             continue
-        user_content = prompts.build_user_prompt_full_document(chunk, mode, i, total)
+        user_content = prompts.build_user_prompt_full_document(
+            chunk, mode, i, total, lang
+        )
+        logger.info(
+            "LLM: calling API chunk %s/%s (%s chars) — waiting on the model (no output until the request finishes)…",
+            i + 1,
+            total,
+            len(chunk),
+        )
+        t0 = time.perf_counter()
         resp = client.chat.completions.create(
             model=settings.MODEL_NAME,
             messages=[
-                {"role": "system", "content": prompts.REVIEW_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
             temperature=0.2,
         )
+        elapsed = time.perf_counter() - t0
         raw = resp.choices[0].message.content or "[]"
-        all_issues.extend(normalize_model_output(raw))
+        parsed = normalize_model_output(raw)
+        logger.info(
+            "LLM: chunk %s/%s done in %.1fs → %s issue(s) parsed",
+            i + 1,
+            total,
+            elapsed,
+            len(parsed),
+        )
+        all_issues.extend(parsed)
+    logger.info("LLM: total issues from all chunks: %s", len(all_issues))
     return all_issues

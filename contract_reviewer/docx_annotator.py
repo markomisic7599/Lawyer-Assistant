@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from docx import Document
@@ -10,7 +11,16 @@ from docx.oxml import OxmlElement
 from docx.text.paragraph import Paragraph
 
 from .docx_reader import paragraph_by_flat_index
+from .logging_setup import ensure_logging
+from .prompts import (
+    DOC_REVIEWER_NOTE_PREFIX,
+    DOC_SUMMARY_TITLE,
+    LANG_EN,
+    VALID_LANGUAGES,
+)
 from .span_mapper import RunSpan
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -48,6 +58,7 @@ def annotate_issues(
     output_path: str,
     issues: list[IssueAnnotation],
     *,
+    language: str = LANG_EN,
     add_summary_page: bool = False,
 ) -> str:
     """
@@ -59,6 +70,15 @@ def annotate_issues(
 
     Returns output_path.
     """
+    ensure_logging()
+    lang = language if language in VALID_LANGUAGES else LANG_EN
+    note_prefix = DOC_REVIEWER_NOTE_PREFIX[lang]
+    logger.info(
+        "Annotate: %s issue(s) → %s (language=%s)",
+        len(issues),
+        output_path,
+        lang,
+    )
     doc = Document(input_path)
     index_map = paragraph_by_flat_index(doc)
 
@@ -82,7 +102,7 @@ def annotate_issues(
         attach_after = last_note_after.get(span.paragraph_index, base)
         note = _insert_paragraph_after(attach_after)
         run = note.add_run(
-            f"Reviewer note [{issue.severity}] ({issue.issue_type}): {issue.suggestion}"
+            f"{note_prefix} [{issue.severity}] ({issue.issue_type}): {issue.suggestion}"
         )
         run.italic = True
         if base.runs:
@@ -92,7 +112,7 @@ def annotate_issues(
     if add_summary_page:
         doc.add_paragraph("")
         h = doc.add_paragraph()
-        h.add_run("Contract review summary").bold = True
+        h.add_run(DOC_SUMMARY_TITLE[lang]).bold = True
         for issue in issues:
             doc.add_paragraph(
                 f"[{issue.severity}] {issue.issue_type}: {issue.suggestion[:500]}"

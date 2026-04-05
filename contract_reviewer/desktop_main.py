@@ -12,18 +12,24 @@ if str(_ROOT) not in sys.path:
 
 import webview
 
+from contract_reviewer import settings
 from contract_reviewer.app import build_app
 
 
 def launch_desktop_app(port: int = 7860) -> None:
     demo = build_app()
     demo.queue()
+    allowed_paths = [
+        str(settings.OUTPUT_DIR.resolve()),
+        str(_ROOT.resolve()),
+    ]
     demo.launch(
         server_name="127.0.0.1",
         server_port=port,
         prevent_thread_lock=True,
         inbrowser=False,
         show_error=True,
+        allowed_paths=allowed_paths,
     )
     deadline = time.time() + 30
     url = f"http://127.0.0.1:{port}"
