@@ -17,6 +17,10 @@ OPENAI_BASE_URL: str | None = os.getenv("OPENAI_BASE_URL")  # optional, for comp
 # Chunking
 MAX_CHUNK_CHARS: int = int(os.getenv("CONTRACT_REVIEWER_MAX_CHUNK", "6000"))
 
+# Mind map (process flowchart) feature
+MINDMAP_MAX_CHUNK_CHARS: int = int(os.getenv("MINDMAP_MAX_CHUNK", "9000"))
+MINDMAP_CHUNK_OVERLAP_CHARS: int = int(os.getenv("MINDMAP_CHUNK_OVERLAP", "400"))
+
 # Files
 _output_env = os.getenv("CONTRACT_REVIEWER_OUTPUT_DIR", "").strip()
 OUTPUT_DIR: Path = (
@@ -29,6 +33,8 @@ KEEP_TEMP_FILES: bool = os.getenv("CONTRACT_REVIEWER_KEEP_TEMP", "").lower() in 
     "true",
     "yes",
 )
+
+MINDMAP_OUTPUT_DIR: Path = OUTPUT_DIR / "mindmaps"
 
 # Review UI defaults
 DEFAULT_REVIEW_MODE: str = "balanced"

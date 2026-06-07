@@ -55,6 +55,11 @@ def _client() -> OpenAI:
     return OpenAI(**kwargs)
 
 
+def build_client() -> OpenAI:
+    """Public accessor so other features (e.g. mind map) can reuse the client."""
+    return _client()
+
+
 def review_clause(
     text: str,
     mode: str,

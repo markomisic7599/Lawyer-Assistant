@@ -14,16 +14,19 @@ import gradio as gr
 import logging
 
 from contract_reviewer import settings
+from contract_reviewer.document_reader import SUPPORTED_SUFFIXES
 from contract_reviewer.logging_setup import ensure_logging
+from contract_reviewer.mindmap_pipeline import generate_mindmap_ui
 from contract_reviewer.review_pipeline import review_contract_ui
 
 logger = logging.getLogger(__name__)
 
 
 def _gradio_allowed_paths() -> list[str]:
-    """Paths Gradio may expose for download (output dir + project root)."""
+    """Paths Gradio may expose for download (output dirs + project root)."""
     return [
         str(settings.OUTPUT_DIR.resolve()),
+        str(settings.MINDMAP_OUTPUT_DIR.resolve()),
         str(_ROOT.resolve()),
     ]
 
@@ -50,44 +53,105 @@ def review_contract_gradio(
     return review_contract_ui(path, mode, language=language)
 
 
+def generate_mindmap_gradio(
+    upload,
+    detail: str,
+    language: str,
+    direction: str,
+) -> tuple[str, str, str | None, str | None, str | None]:
+    path = _upload_to_path(upload)
+    return generate_mindmap_ui(path, detail, language, direction)
+
+
 def build_app() -> gr.Blocks:
     ensure_logging()
-    logger.info("Building Gradio Blocks (Contract Reviewer)")
-    with gr.Blocks(title="Contract Reviewer") as demo:
-        gr.Markdown(
-            "## Contract reviewer\n"
-            "Upload a **.docx** contract. Choose **review language** (English or Serbian Latin) "
-            "for issue labels and suggestions. The app returns a copy with **highlights** "
-            "and **reviewer note** paragraphs."
-        )
-        with gr.Row():
-            file_in = gr.File(
-                label="Contract (.docx)",
-                file_types=[".docx"],
-                type="filepath",
-            )
-            mode = gr.Dropdown(
-                choices=["strict", "balanced", "light"],
-                value="balanced",
-                label="Review mode",
-            )
-            language = gr.Dropdown(
-                choices=[
-                    ("English", "en"),
-                    ("Srpski (latinica)", "sr_latin"),
-                ],
-                value="en",
-                label="Review language",
-            )
-        btn = gr.Button("Review contract", variant="primary")
-        status = gr.Textbox(label="Status", interactive=False, lines=2)
-        file_out = gr.File(label="Download reviewed .docx")
+    logger.info("Building Gradio Blocks (Lawyer Assistant)")
+    mindmap_filetypes = sorted(SUPPORTED_SUFFIXES)
+    with gr.Blocks(title="Lawyer Assistant") as demo:
+        gr.Markdown("# Lawyer Assistant")
+        with gr.Tabs():
+            with gr.Tab("Contract review"):
+                gr.Markdown(
+                    "Upload a **.docx** contract. Choose **review language** (English or Serbian Latin) "
+                    "for issue labels and suggestions. The app returns a copy with **highlights** "
+                    "and **reviewer note** paragraphs."
+                )
+                with gr.Row():
+                    file_in = gr.File(
+                        label="Contract (.docx)",
+                        file_types=[".docx"],
+                        type="filepath",
+                    )
+                    mode = gr.Dropdown(
+                        choices=["strict", "balanced", "light"],
+                        value="balanced",
+                        label="Review mode",
+                    )
+                    language = gr.Dropdown(
+                        choices=[
+                            ("English", "en"),
+                            ("Srpski (latinica)", "sr_latin"),
+                        ],
+                        value="en",
+                        label="Review language",
+                    )
+                btn = gr.Button("Review contract", variant="primary")
+                status = gr.Textbox(label="Status", interactive=False, lines=2)
+                file_out = gr.File(label="Download reviewed .docx")
 
-        btn.click(
-            fn=review_contract_gradio,
-            inputs=[file_in, mode, language],
-            outputs=[status, file_out],
-        )
+                btn.click(
+                    fn=review_contract_gradio,
+                    inputs=[file_in, mode, language],
+                    outputs=[status, file_out],
+                )
+
+            with gr.Tab("Process mind map"):
+                gr.Markdown(
+                    "Upload a law, regulation, or procedure "
+                    f"(**{', '.join(mindmap_filetypes)}**). The app builds a **process flowchart** "
+                    "of the steps, decision/authority gates, required documents, deadlines, and "
+                    "article references — rendered below and exportable as HTML, Mermaid, or JSON."
+                )
+                with gr.Row():
+                    mm_file_in = gr.File(
+                        label=f"Document ({', '.join(mindmap_filetypes)})",
+                        file_types=mindmap_filetypes,
+                        type="filepath",
+                    )
+                    mm_detail = gr.Dropdown(
+                        choices=[
+                            ("Overview (main steps)", "overview"),
+                            ("Detailed (all steps & documents)", "detailed"),
+                        ],
+                        value="overview",
+                        label="Detail level",
+                    )
+                    mm_language = gr.Dropdown(
+                        choices=[
+                            ("English", "en"),
+                            ("Srpski (latinica)", "sr_latin"),
+                        ],
+                        value="en",
+                        label="Diagram language",
+                    )
+                    mm_direction = gr.Dropdown(
+                        choices=["Top to bottom", "Left to right"],
+                        value="Top to bottom",
+                        label="Layout",
+                    )
+                mm_btn = gr.Button("Generate mind map", variant="primary")
+                mm_status = gr.Textbox(label="Status", interactive=False, lines=2)
+                mm_preview = gr.HTML(label="Mind map preview")
+                with gr.Row():
+                    mm_html_out = gr.File(label="Download HTML (open in browser)")
+                    mm_mmd_out = gr.File(label="Download Mermaid (.mmd)")
+                    mm_json_out = gr.File(label="Download JSON")
+
+                mm_btn.click(
+                    fn=generate_mindmap_gradio,
+                    inputs=[mm_file_in, mm_detail, mm_language, mm_direction],
+                    outputs=[mm_status, mm_preview, mm_html_out, mm_mmd_out, mm_json_out],
+                )
     return demo
 
 
