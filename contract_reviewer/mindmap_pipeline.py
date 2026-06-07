@@ -31,6 +31,7 @@ class MindMapResult:
     mermaid_path: Path
     json_path: Path
     preview_html: str
+    mermaid_text: str
 
 
 def generate_mindmap(
@@ -78,8 +79,9 @@ def generate_mindmap(
     mermaid_path = settings.MINDMAP_OUTPUT_DIR / f"{stem}_mindmap.mmd"
     json_path = settings.MINDMAP_OUTPUT_DIR / f"{stem}_mindmap.json"
 
+    mermaid_text = render_mermaid(mind_map, direction=direction)
     html_path.write_text(render_html(mind_map, direction=direction), encoding="utf-8")
-    mermaid_path.write_text(render_mermaid(mind_map, direction=direction), encoding="utf-8")
+    mermaid_path.write_text(mermaid_text, encoding="utf-8")
     json_path.write_text(mind_map.to_json(), encoding="utf-8")
     logger.info("MindMap: wrote %s, %s, %s", html_path, mermaid_path, json_path)
 
@@ -89,6 +91,7 @@ def generate_mindmap(
         mermaid_path=mermaid_path,
         json_path=json_path,
         preview_html=render_preview_html(mind_map, direction=direction),
+        mermaid_text=mermaid_text,
     )
 
 
@@ -97,25 +100,25 @@ def generate_mindmap_ui(
     detail: str,
     language: str,
     direction_label: str,
-) -> tuple[str, str, str | None, str | None, str | None]:
+) -> tuple[str, str, str | None, str | None, str | None, str]:
     """Gradio-friendly wrapper.
 
-    Returns (status, preview_html, html_file, mermaid_file, json_file).
+    Returns (status, preview_html, html_file, mermaid_file, json_file, mermaid_source).
     """
     ensure_logging()
     if not uploaded_path:
-        return "Please upload a document.", "", None, None, None
+        return "Please upload a document.", "", None, None, None, ""
     p = Path(uploaded_path)
     if p.suffix.lower() not in SUPPORTED_SUFFIXES:
         supported = ", ".join(sorted(SUPPORTED_SUFFIXES))
-        return f"Unsupported file type. Supported: {supported}.", "", None, None, None
+        return f"Unsupported file type. Supported: {supported}.", "", None, None, None, ""
 
     direction = "LR" if str(direction_label).lower().startswith("left") else "TD"
     try:
         result = generate_mindmap(p, detail=detail, language=language, direction=direction)
     except Exception as exc:  # noqa: BLE001 - surface error in UI
         logger.exception("MindMap: generation failed")
-        return f"Error: {exc}", "", None, None, None
+        return f"Error: {exc}", "", None, None, None, ""
 
     status = (
         f"Mind map ready: {len(result.mind_map.nodes)} step(s), "
@@ -127,4 +130,5 @@ def generate_mindmap_ui(
         str(result.html_path),
         str(result.mermaid_path),
         str(result.json_path),
+        result.mermaid_text,
     )

@@ -29,9 +29,10 @@ MERMAID_HEAD = """
 <script type="module">
   import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
   mermaid.initialize({ startOnLoad: false, securityLevel: "loose",
+    maxEdges: 5000, maxTextSize: 5000000,
     flowchart: { htmlLabels: true, useMaxWidth: true } });
-  window.__mermaidRun = () => {
-    try { mermaid.run({ querySelector: ".mermaid:not([data-processed='true'])" }); }
+  window.__mermaidRun = async () => {
+    try { await mermaid.run({ querySelector: ".mermaid:not([data-processed='true'])" }); }
     catch (e) { console.error("mermaid run failed", e); }
   };
 </script>
@@ -80,7 +81,7 @@ def generate_mindmap_gradio(
     detail: str,
     language: str,
     direction: str,
-) -> tuple[str, str, str | None, str | None, str | None]:
+) -> tuple[str, str, str | None, str | None, str | None, str]:
     path = _upload_to_path(upload)
     return generate_mindmap_ui(path, detail, language, direction)
 
@@ -168,11 +169,24 @@ def build_app() -> gr.Blocks:
                     mm_html_out = gr.File(label="Download HTML (open in browser)")
                     mm_mmd_out = gr.File(label="Download Mermaid (.mmd)")
                     mm_json_out = gr.File(label="Download JSON")
+                with gr.Accordion("Debug: Mermaid source", open=False):
+                    gr.Markdown(
+                        "If the preview shows a Mermaid syntax error, copy this into "
+                        "[mermaid.live](https://mermaid.live) to see the exact failing line."
+                    )
+                    mm_source = gr.Code(label="Mermaid source", language="markdown")
 
                 mm_btn.click(
                     fn=generate_mindmap_gradio,
                     inputs=[mm_file_in, mm_detail, mm_language, mm_direction],
-                    outputs=[mm_status, mm_preview, mm_html_out, mm_mmd_out, mm_json_out],
+                    outputs=[
+                        mm_status,
+                        mm_preview,
+                        mm_html_out,
+                        mm_mmd_out,
+                        mm_json_out,
+                        mm_source,
+                    ],
                 ).then(fn=None, inputs=None, outputs=None, js=_MERMAID_RUN_JS)
     return demo
 

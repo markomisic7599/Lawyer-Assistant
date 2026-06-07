@@ -88,4 +88,6 @@ def test_render_mermaid_shapes_and_escaping() -> None:
     assert "{{" in out  # hexagon document
     assert '{"Ministry &quot;X&quot;' in out  # diamond + escaped quotes
     assert '-- "15 days" -->' in out
-    assert "class o outcome;" in out
+    assert "class n_o mm_outcome;" in out  # namespaced id + prefixed css class
+    # No bare reserved keyword used as a class name (would break Mermaid).
+    assert "classDef end " not in out and "classDef start " not in out
