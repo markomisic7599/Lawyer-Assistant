@@ -13,7 +13,7 @@ if str(_ROOT) not in sys.path:
 import webview
 
 from contract_reviewer import settings
-from contract_reviewer.app import build_app
+from contract_reviewer.app import MERMAID_HEAD, build_app
 
 
 def launch_desktop_app(port: int = 7860) -> None:
@@ -21,6 +21,7 @@ def launch_desktop_app(port: int = 7860) -> None:
     demo.queue()
     allowed_paths = [
         str(settings.OUTPUT_DIR.resolve()),
+        str(settings.MINDMAP_OUTPUT_DIR.resolve()),
         str(_ROOT.resolve()),
     ]
     demo.launch(
@@ -30,6 +31,7 @@ def launch_desktop_app(port: int = 7860) -> None:
         inbrowser=False,
         show_error=True,
         allowed_paths=allowed_paths,
+        head=MERMAID_HEAD,
     )
     deadline = time.time() + 30
     url = f"http://127.0.0.1:{port}"

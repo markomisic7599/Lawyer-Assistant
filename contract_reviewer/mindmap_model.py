@@ -224,15 +224,28 @@ def render_html(mind_map: MindMap, *, direction: str = "TD") -> str:
     return _HTML_TEMPLATE.format(title=safe_title, diagram=diagram)
 
 
-def render_iframe(mind_map: MindMap, *, direction: str = "TD", height: int = 720) -> str:
-    """Render an iframe (srcdoc) that embeds the standalone HTML.
+def _html_escape(text: str) -> str:
+    """Escape so Mermaid source survives as literal text inside <pre>.
 
-    Using an iframe lets the Mermaid script run reliably inside Gradio's HTML
-    component, isolated from the host page's CSP/sanitisation.
+    Gradio's HTML component sanitises its value, so we cannot rely on inline
+    scripts or iframe srcdoc. Instead we emit a plain ``<pre class="mermaid">``
+    (which survives sanitisation) and let a page-level Mermaid script render it.
+    The diagram source is HTML-escaped so tags inside node labels (e.g. <br/>)
+    stay as text and are not collapsed by the sanitiser.
     """
-    doc = render_html(mind_map, direction=direction).replace('"', "&quot;")
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def render_preview_html(mind_map: MindMap, *, direction: str = "TD") -> str:
+    """Render a sanitisation-safe HTML snippet for the in-app Gradio preview.
+
+    Requires the Mermaid loader injected into the page <head> (see app.py),
+    which exposes ``window.__mermaidRun`` to process ``.mermaid`` blocks.
+    """
+    diagram = _html_escape(render_mermaid(mind_map, direction=direction))
     return (
-        f'<iframe srcdoc="{doc}" '
-        f'style="width:100%;height:{height}px;border:1px solid #ddd;border-radius:8px;background:#fff;" '
-        f'sandbox="allow-scripts"></iframe>'
+        '<div style="overflow:auto;max-height:75vh;border:1px solid #e5e5e5;'
+        'border-radius:8px;background:#fff;padding:12px;">'
+        f'<pre class="mermaid" style="background:#fff;border:none;margin:0;">{diagram}</pre>'
+        "</div>"
     )

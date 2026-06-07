@@ -15,8 +15,8 @@ from .mindmap_model import (
     MindMap,
     mindmap_from_dict,
     render_html,
-    render_iframe,
     render_mermaid,
+    render_preview_html,
 )
 from .mindmap_prompts import DETAIL_OVERVIEW, VALID_DETAIL
 from .prompts import LANG_EN, VALID_LANGUAGES
@@ -30,7 +30,7 @@ class MindMapResult:
     html_path: Path
     mermaid_path: Path
     json_path: Path
-    iframe_html: str
+    preview_html: str
 
 
 def generate_mindmap(
@@ -88,7 +88,7 @@ def generate_mindmap(
         html_path=html_path,
         mermaid_path=mermaid_path,
         json_path=json_path,
-        iframe_html=render_iframe(mind_map, direction=direction),
+        preview_html=render_preview_html(mind_map, direction=direction),
     )
 
 
@@ -123,7 +123,7 @@ def generate_mindmap_ui(
     )
     return (
         status,
-        result.iframe_html,
+        result.preview_html,
         str(result.html_path),
         str(result.mermaid_path),
         str(result.json_path),

@@ -21,6 +21,28 @@ from contract_reviewer.review_pipeline import review_contract_ui
 
 logger = logging.getLogger(__name__)
 
+# Injected into the page <head> at launch. Gradio sanitises gr.HTML values
+# (stripping inline scripts / iframe srcdoc), so the Mermaid library must be
+# loaded at the trusted page level. It exposes window.__mermaidRun() which we
+# call after the preview HTML updates to render any <pre class="mermaid"> block.
+MERMAID_HEAD = """
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: false, securityLevel: "loose",
+    flowchart: { htmlLabels: true, useMaxWidth: true } });
+  window.__mermaidRun = () => {
+    try { mermaid.run({ querySelector: ".mermaid:not([data-processed='true'])" }); }
+    catch (e) { console.error("mermaid run failed", e); }
+  };
+</script>
+"""
+
+# Runs after the preview gr.HTML updates; retries until the loader is ready.
+_MERMAID_RUN_JS = (
+    "() => { const t = () => { if (window.__mermaidRun) { window.__mermaidRun(); } "
+    "else { setTimeout(t, 120); } }; setTimeout(t, 60); }"
+)
+
 
 def _gradio_allowed_paths() -> list[str]:
     """Paths Gradio may expose for download (output dirs + project root)."""
@@ -151,7 +173,7 @@ def build_app() -> gr.Blocks:
                     fn=generate_mindmap_gradio,
                     inputs=[mm_file_in, mm_detail, mm_language, mm_direction],
                     outputs=[mm_status, mm_preview, mm_html_out, mm_mmd_out, mm_json_out],
-                )
+                ).then(fn=None, inputs=None, outputs=None, js=_MERMAID_RUN_JS)
     return demo
 
 
@@ -164,6 +186,7 @@ def main() -> None:
         server_name="127.0.0.1",
         server_port=7860,
         allowed_paths=allowed,
+        head=MERMAID_HEAD,
     )
 
 
