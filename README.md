@@ -4,7 +4,7 @@ emoji: ⚖️
 colorFrom: yellow
 colorTo: indigo
 sdk: gradio
-sdk_version: 4.44.0
+sdk_version: 6.0.2
 app_file: contract_reviewer/app.py
 pinned: false
 ---
