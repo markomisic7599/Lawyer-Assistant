@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .docx_reader import DocumentStructure, ParagraphBlock, extract_runs
 
-SUPPORTED_SUFFIXES: frozenset[str] = frozenset({".docx", ".txt", ".md"})
+SUPPORTED_SUFFIXES: frozenset[str] = frozenset({".docx", ".txt", ".md", ".pdf"})
 
 
 def _structure_from_text(text: str) -> DocumentStructure:
@@ -35,6 +35,19 @@ def _structure_from_text(text: str) -> DocumentStructure:
     return DocumentStructure(blocks=blocks, full_text=full_text)
 
 
+def _text_from_pdf(path: Path) -> str:
+    """Extract text from a PDF, page by page, in document order.
+
+    PDF text has no reliable paragraph structure, so we keep pypdf's line
+    breaks and let the chunker re-group them on article/heading boundaries.
+    """
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(path))
+    pages = [(page.extract_text() or "").strip() for page in reader.pages]
+    return "\n".join(p for p in pages if p)
+
+
 def read_document(doc_path: str | Path) -> DocumentStructure:
     """Read a supported document into a DocumentStructure.
 
@@ -47,6 +60,8 @@ def read_document(doc_path: str | Path) -> DocumentStructure:
         return extract_runs(str(path))
     if suffix in {".txt", ".md"}:
         return _structure_from_text(path.read_text(encoding="utf-8", errors="replace"))
+    if suffix == ".pdf":
+        return _structure_from_text(_text_from_pdf(path))
     raise ValueError(
         f"Unsupported document type '{suffix}'. "
         f"Supported types: {', '.join(sorted(SUPPORTED_SUFFIXES))}."
