@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -198,18 +199,34 @@ def build_app() -> gr.Blocks:
                         mm_dot_out,
                         mm_source,
                     ],
+                    # Show a single progress bar on the status box instead of one
+                    # tracker per output component.
+                    show_progress_on=mm_status,
                 ).then(fn=None, inputs=None, outputs=None, js=_MERMAID_RUN_JS)
     return demo
 
 
+def _server_config() -> tuple[str, int]:
+    """Pick host/port: bind 0.0.0.0 on Hugging Face Spaces, localhost otherwise.
+
+    Honours the standard GRADIO_SERVER_NAME/GRADIO_SERVER_PORT env vars and
+    falls back to 0.0.0.0 when running inside a Space (SPACE_ID is set).
+    """
+    in_space = bool(os.getenv("SPACE_ID"))
+    host = os.getenv("GRADIO_SERVER_NAME") or ("0.0.0.0" if in_space else "127.0.0.1")
+    port = int(os.getenv("GRADIO_SERVER_PORT", "7860"))
+    return host, port
+
+
 def main() -> None:
     ensure_logging()
-    logger.info("Launching Gradio on http://127.0.0.1:7860")
+    host, port = _server_config()
+    logger.info("Launching Gradio on http://%s:%s", host, port)
     allowed = _gradio_allowed_paths()
     logger.info("Gradio allowed_paths for downloads: %s", allowed)
     build_app().launch(
-        server_name="127.0.0.1",
-        server_port=7860,
+        server_name=host,
+        server_port=port,
         allowed_paths=allowed,
         head=MERMAID_HEAD,
     )
