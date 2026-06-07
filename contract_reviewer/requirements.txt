@@ -4,6 +4,7 @@ pypdf>=4.0.0
 pywebview>=5.0
 openai>=1.40.0
 rapidfuzz>=3.9.0
+graphviz>=0.20.0
 python-dotenv>=1.0.0
 pytest>=8.0.0
 pyinstaller>=6.0.0

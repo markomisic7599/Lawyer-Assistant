@@ -154,21 +154,27 @@ _CLASS_DEFS = (
 )
 
 
+def _build_id_map(mind_map: MindMap) -> dict[str, str]:
+    """Map each node id to a unique, syntax-safe id (shared by Mermaid/DOT)."""
+    id_map: dict[str, str] = {}
+    for node in mind_map.nodes:
+        safe_id = _safe_node_id(node.id)
+        # Guard against collisions after sanitising distinct ids.
+        suffix = 1
+        base = safe_id
+        while safe_id in id_map.values():
+            safe_id = f"{base}_{suffix}"
+            suffix += 1
+        id_map[node.id] = safe_id
+    return id_map
+
+
 def render_mermaid(mind_map: MindMap, *, direction: str = "TD") -> str:
     """Render the mind map to a Mermaid flowchart definition."""
     lines: list[str] = [f"flowchart {direction}"]
     lines.extend(f"    {cd}" for cd in _CLASS_DEFS)
 
-    id_map: dict[str, str] = {}
-    for node in mind_map.nodes:
-        mermaid_id = _safe_node_id(node.id)
-        # Guard against collisions after sanitising distinct ids.
-        suffix = 1
-        base = mermaid_id
-        while mermaid_id in id_map.values():
-            mermaid_id = f"{base}_{suffix}"
-            suffix += 1
-        id_map[node.id] = mermaid_id
+    id_map = _build_id_map(mind_map)
 
     for node in mind_map.nodes:
         mermaid_id = id_map[node.id]
@@ -187,6 +193,94 @@ def render_mermaid(mind_map: MindMap, *, direction: str = "TD") -> str:
         else:
             lines.append(f"    {src} --> {dst}")
 
+    return "\n".join(lines)
+
+
+# --- Graphviz DOT rendering --------------------------------------------------
+#
+# DOT is rendered to a flat SVG/PNG (via the ``dot`` engine) so a colleague can
+# open the diagram in any browser or image viewer with no internet connection
+# and no Mermaid/JS runtime. The shape/colour mapping mirrors the Mermaid one
+# so both exports look like the same hand-drawn process flowchart.
+
+# shape + fill/stroke/font per node type; ``rounded`` gives start/end a stadium look.
+_DOT_STYLES: dict[str, dict[str, Any]] = {
+    "title": {"shape": "box", "fill": "#f3d250", "stroke": "#c9a227", "font": "#7a1f1f", "bold": True},
+    "process": {"shape": "box", "fill": "#ffffff", "stroke": "#4a4a4a", "font": "#222222", "bold": False},
+    "decision": {"shape": "diamond", "fill": "#a7c83f", "stroke": "#6b8e23", "font": "#1c2b00", "bold": False},
+    "document": {"shape": "hexagon", "fill": "#ffffff", "stroke": "#7a7a7a", "font": "#333333", "bold": False},
+    "outcome": {"shape": "box", "fill": "#3c9d6e", "stroke": "#2e7d54", "font": "#ffffff", "bold": True},
+    "start": {"shape": "box", "fill": "#e8eef7", "stroke": "#36588a", "font": "#10243f", "bold": False, "rounded": True},
+    "end": {"shape": "box", "fill": "#e8eef7", "stroke": "#36588a", "font": "#10243f", "bold": False, "rounded": True},
+}
+
+
+def _dot_html_escape(text: str) -> str:
+    """Escape text for a DOT HTML-like label (``label=<...>``)."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\n", " ")
+        .strip()
+    )
+
+
+def _dot_quote(text: str) -> str:
+    """Escape text for a double-quoted DOT string (edge labels)."""
+    return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ").strip()
+
+
+def _dot_node_label(node: MindMapNode, style: dict[str, Any]) -> str:
+    """HTML-like label: bold/plain title plus an italic line of article refs."""
+    main = _dot_html_escape(node.label)
+    if style.get("bold"):
+        main = f"<B>{main}</B>"
+    parts = [main]
+    if node.article_refs:
+        refs = _dot_html_escape(", ".join(node.article_refs))
+        parts.append(f'<BR/><FONT POINT-SIZE="10"><I>{refs}</I></FONT>')
+    return "<" + "".join(parts) + ">"
+
+
+def render_dot(mind_map: MindMap, *, direction: str = "TD") -> str:
+    """Render the mind map to a Graphviz DOT digraph definition."""
+    rankdir = "LR" if str(direction).upper() == "LR" else "TB"
+    id_map = _build_id_map(mind_map)
+    title = _dot_html_escape(mind_map.title) or "Process mind map"
+
+    lines: list[str] = [
+        "digraph mindmap {",
+        f"    rankdir={rankdir};",
+        '    bgcolor="#ffffff";',
+        f'    labelloc="t"; label=<<B>{title}</B>>; fontname="Helvetica"; fontsize="16";',
+        '    node [fontname="Helvetica", fontsize="12", style="filled", penwidth="1.5"];',
+        '    edge [fontname="Helvetica", fontsize="10", color="#555555"];',
+    ]
+
+    for node in mind_map.nodes:
+        node_id = id_map[node.id]
+        style = _DOT_STYLES.get(node.normalized_type(), _DOT_STYLES[_DEFAULT_NODE_TYPE])
+        shape_style = "filled,rounded" if style.get("rounded") else "filled"
+        lines.append(
+            f"    {node_id} ["
+            f"label={_dot_node_label(node, style)}, "
+            f'shape={style["shape"]}, style="{shape_style}", '
+            f'fillcolor="{style["fill"]}", color="{style["stroke"]}", '
+            f'fontcolor="{style["font"]}"];'
+        )
+
+    for edge in mind_map.edges:
+        src = id_map.get(edge.source)
+        dst = id_map.get(edge.target)
+        if not src or not dst:
+            continue
+        if edge.label:
+            lines.append(f'    {src} -> {dst} [label="{_dot_quote(edge.label)}"];')
+        else:
+            lines.append(f"    {src} -> {dst};")
+
+    lines.append("}")
     return "\n".join(lines)
 
 

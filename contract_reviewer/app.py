@@ -81,9 +81,15 @@ def generate_mindmap_gradio(
     detail: str,
     language: str,
     direction: str,
-) -> tuple[str, str, str | None, str | None, str | None, str]:
+    progress: gr.Progress = gr.Progress(),
+) -> tuple[str, str, str | None, str | None, str | None, str | None, str | None, str]:
     path = _upload_to_path(upload)
-    return generate_mindmap_ui(path, detail, language, direction)
+    progress(0, desc="Starting…")
+
+    def progress_cb(fraction: float, desc: str) -> None:
+        progress(fraction, desc=desc)
+
+    return generate_mindmap_ui(path, detail, language, direction, progress_cb=progress_cb)
 
 
 def build_app() -> gr.Blocks:
@@ -132,9 +138,10 @@ def build_app() -> gr.Blocks:
                 gr.Markdown(
                     "Upload a law, regulation, or procedure "
                     f"(**{', '.join(mindmap_filetypes)}**). The app builds a **process flowchart** "
-                    "of the steps, decision/authority gates, required documents, deadlines, and "
-                    "article references — rendered below and exportable as HTML, Mermaid, or JSON."
-                )
+                        "of the steps, decision/authority gates, required documents, deadlines, and "
+                        "article references — rendered below and exportable as an SVG image, HTML, "
+                        "Mermaid, DOT, or JSON."
+                    )
                 with gr.Row():
                     mm_file_in = gr.File(
                         label=f"Document ({', '.join(mindmap_filetypes)})",
@@ -166,8 +173,10 @@ def build_app() -> gr.Blocks:
                 mm_status = gr.Textbox(label="Status", interactive=False, lines=2)
                 mm_preview = gr.HTML(label="Mind map preview")
                 with gr.Row():
+                    mm_svg_out = gr.File(label="Download SVG image (open anywhere, no internet)")
                     mm_html_out = gr.File(label="Download HTML (open in browser)")
                     mm_mmd_out = gr.File(label="Download Mermaid (.mmd)")
+                    mm_dot_out = gr.File(label="Download Graphviz (.dot)")
                     mm_json_out = gr.File(label="Download JSON")
                 with gr.Accordion("Debug: Mermaid source", open=False):
                     gr.Markdown(
@@ -183,8 +192,10 @@ def build_app() -> gr.Blocks:
                         mm_status,
                         mm_preview,
                         mm_html_out,
+                        mm_svg_out,
                         mm_mmd_out,
                         mm_json_out,
+                        mm_dot_out,
                         mm_source,
                     ],
                 ).then(fn=None, inputs=None, outputs=None, js=_MERMAID_RUN_JS)

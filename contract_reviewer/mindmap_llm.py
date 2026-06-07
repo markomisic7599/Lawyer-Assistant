@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from typing import Any
 
 from . import mindmap_prompts, settings
@@ -14,6 +15,9 @@ from .logging_setup import ensure_logging
 from .mindmap_prompts import VALID_DETAIL, DETAIL_OVERVIEW
 
 logger = logging.getLogger(__name__)
+
+# Reports progress as (fraction in 0..1, human-readable description).
+ProgressCallback = Callable[[float, str], None]
 
 
 def _parse_json_object(raw: str) -> dict[str, Any]:
@@ -131,24 +135,43 @@ def build_graph(
     chunks: list[str],
     detail: str,
     language: str,
+    *,
+    progress_cb: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    """End-to-end model work: extract per chunk, then consolidate to one graph."""
+    """End-to-end model work: extract per chunk, then consolidate to one graph.
+
+    ``progress_cb`` (if given) is called with a fraction in 0..1 and a short
+    description as each chunk is extracted and during consolidation.
+    """
     ensure_logging()
     detail = detail if detail in VALID_DETAIL else DETAIL_OVERVIEW
     total = len(chunks)
+    # One step per chunk, plus a consolidation step when there are multiple chunks.
+    steps = max(total + (1 if total > 1 else 0), 1)
+
+    def _report(done: int, desc: str) -> None:
+        if progress_cb is not None:
+            progress_cb(min(done / steps, 1.0), desc)
+
     partials: list[dict[str, Any]] = []
     for i, chunk in enumerate(chunks):
+        _report(i, f"Analyzing section {i + 1} of {total}…")
         if not chunk.strip():
             continue
         partials.append(extract_graph_from_chunk(chunk, detail, i, total, language))
 
     if not partials:
+        _report(steps, "No content found")
         return {"title": "Process", "nodes": [], "edges": []}
     if len(partials) == 1:
+        _report(steps, "Building diagram…")
         return partials[0]
 
+    _report(total, "Combining sections into one flowchart…")
     try:
-        return consolidate_graphs(partials, detail, language)
+        result = consolidate_graphs(partials, detail, language)
     except Exception as exc:  # noqa: BLE001 - fall back to a usable graph
         logger.warning("MindMap LLM: consolidation failed (%s); using fallback merge", exc)
-        return merge_partials_fallback(partials)
+        result = merge_partials_fallback(partials)
+    _report(steps, "Building diagram…")
+    return result

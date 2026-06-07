@@ -9,6 +9,7 @@ from contract_reviewer.mindmap_model import (
     MindMapEdge,
     MindMapNode,
     mindmap_from_dict,
+    render_dot,
     render_mermaid,
 )
 
@@ -91,3 +92,36 @@ def test_render_mermaid_shapes_and_escaping() -> None:
     assert "class n_o mm_outcome;" in out  # namespaced id + prefixed css class
     # No bare reserved keyword used as a class name (would break Mermaid).
     assert "classDef end " not in out and "classDef start " not in out
+
+
+def test_render_dot_shapes_escaping_and_edges() -> None:
+    mm = MindMap(
+        title="Permit <process>",
+        nodes=[
+            MindMapNode(id="t", label="Process", type="title"),
+            MindMapNode(id="d", label='Ministry "X"', type="decision", article_refs=["Art. 9 L3"]),
+            MindMapNode(id="doc", label="EIA Study", type="document"),
+            MindMapNode(id="o", label="Permit issued", type="outcome"),
+        ],
+        edges=[
+            MindMapEdge(source="t", target="d"),
+            MindMapEdge(source="d", target="doc", label='within "15" days'),
+            MindMapEdge(source="doc", target="missing"),  # dropped: unknown target
+        ],
+    )
+    out = render_dot(mm, direction="LR")
+    assert out.startswith("digraph mindmap {")
+    assert out.rstrip().endswith("}")
+    assert "rankdir=LR;" in out
+    # Title is HTML-escaped inside the HTML-like graph label.
+    assert "Permit &lt;process&gt;" in out
+    # Shapes per node type.
+    assert "shape=diamond" in out
+    assert "shape=hexagon" in out
+    # Article refs rendered as an italic sub-line.
+    assert "<I>Art. 9 L3</I>" in out
+    # Edge label uses a quoted DOT string with escaped quotes.
+    assert '[label="within \\"15\\" days"]' in out
+    # Directed edges and dropped edge to a missing node.
+    assert "n_t -> n_d;" in out
+    assert "missing" not in out
