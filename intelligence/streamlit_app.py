@@ -22,10 +22,11 @@ if str(_ROOT) not in sys.path:
 
 import streamlit as st
 
-from intelligence import config, notifications, outreach, solution
+from intelligence import cold_pitch, config, fund_radar, notifications, outreach, relationships, solution
 from intelligence.clients_data import Client, match_opportunities, sample_clients
 from intelligence.demo_data import seed_demo
 from intelligence.models import ACTIVE_STAGES, Opportunity, Radar, Stage
+from intelligence.relationships import PathType
 from intelligence.store import Store
 
 DEMO_DB = config.DATA_DIR / "demo.db"
@@ -75,7 +76,7 @@ def _stage_selector(opp: Opportunity, key_prefix: str) -> None:
     )
 
 
-@st.dialog("✉️ Draft outreach", width="large")
+@st.dialog("✉️ Cold pitch", width="large")
 def _outreach_dialog(opp_id: str) -> None:
     store = get_store()
     opp = store.get(opp_id)
@@ -86,7 +87,6 @@ def _outreach_dialog(opp_id: str) -> None:
     label, fg, bg = _RADAR_STYLE[opp.radar]
     st.markdown(f"##### {opp.title}")
 
-    # Contact / WHO panel
     star = " ⭐ decision-maker" if opp.contact.is_decision_maker else ""
     who = opp.contact.name or opp.contact.role or "—"
     left, right = st.columns(2)
@@ -99,21 +99,40 @@ def _outreach_dialog(opp_id: str) -> None:
         st.markdown(f"{_chip(label, fg, bg)}", unsafe_allow_html=True)
         st.markdown(f"**Score:** {opp.score} · **Confidence:** {opp.confidence:.0%}")
 
+    st.caption(
+        "Cold pitch: signal → relevance → key questions → expertise → free micro-delivery. "
+        "No meeting ask in the first message."
+    )
     st.divider()
 
     lang = st.radio(
         "Language",
-        options=["en", "sr"],
-        format_func=lambda x: "English" if x == "en" else "Srpski",
+        options=["sr", "en"],
+        format_func=lambda x: "Srpski" if x == "sr" else "English",
         horizontal=True,
         key=f"lang_{opp.id}",
     )
-    subject_default, body_default = outreach.draft_email(opp, lang=lang)
+    pitch = cold_pitch.build_cold_pitch(opp, lang=lang)
     to_default = outreach.demo_recipient(opp)
 
+    with st.expander("Formula breakdown", expanded=True):
+        st.markdown(f"**A. Poslovni signal:** {pitch.signal}")
+        st.markdown(f"**B. Značaj za kompaniju:** {pitch.relevance}")
+        st.markdown("**Ključna pitanja:**")
+        for q in pitch.key_questions:
+            st.markdown(f"- {q}")
+        st.markdown(f"**C. Ekspertiza:** {pitch.expertise}")
+        st.markdown(f"**D. Mikro-isporuka:** {pitch.micro_delivery}")
+        st.caption(f"{pitch.word_count} words · target ~100–150")
+        if pitch.passes_rules:
+            st.success(pitch.rule_notes[0])
+        else:
+            for n in pitch.rule_notes:
+                st.warning(n)
+
     to_addr = st.text_input("To", value=to_default, key=f"to_{opp.id}_{lang}")
-    subject = st.text_input("Subject", value=subject_default, key=f"subj_{opp.id}_{lang}")
-    body = st.text_area("Message", value=body_default, height=280, key=f"body_{opp.id}_{lang}")
+    subject = st.text_input("Subject", value=pitch.subject, key=f"subj_{opp.id}_{lang}")
+    body = st.text_area("Message", value=pitch.body, height=280, key=f"body_{opp.id}_{lang}")
 
     st.caption("Demo only — no email is actually sent.")
 
@@ -122,16 +141,15 @@ def _outreach_dialog(opp_id: str) -> None:
         with st.spinner("Sending…"):
             time.sleep(0.8)
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-        note = f"[{stamp}] Outreach email sent to {to_addr} — “{subject}”"
+        note = f"[{stamp}] Cold pitch sent to {to_addr} — “{subject}” · offer: {pitch.micro_delivery}"
         opp = store.get(opp_id) or opp
         opp.stage = Stage.CONTACTED
         opp.notes = (opp.notes + "\n" + note).strip()
-        opp.next_action_at = "Follow up in 5 business days"
+        opp.next_action_at = "If they accept the material: send it, then one concrete question — no meeting yet"
         store.upsert(opp, preserve_stage=False)
-        # Keep the stage selectors in sync with the new stage.
         for pref in ("brief", "pipe"):
             st.session_state[f"{pref}_stage_{opp_id}"] = Stage.CONTACTED.value
-        st.session_state["_sent_flash"] = f"Email sent to {to_addr} · moved to CONTACTED"
+        st.session_state["_sent_flash"] = f"Cold pitch sent to {to_addr} · moved to CONTACTED"
         st.rerun()
     c2.button("Cancel", key=f"cancel_{opp.id}")
 
@@ -157,7 +175,7 @@ def _render_card(opp: Opportunity, key_prefix: str) -> None:
             st.caption("Pipeline stage")
             _stage_selector(opp, key_prefix)
             st.caption(f"conf {opp.confidence:.0%}")
-            if st.button("✉️ Draft & send", key=f"{key_prefix}_draft_{opp.id}",
+            if st.button("✉️ Cold pitch", key=f"{key_prefix}_draft_{opp.id}",
                          use_container_width=True):
                 _outreach_dialog(opp.id)
             if opp.stage == Stage.CONTACTED and "sent" in opp.notes.lower():
@@ -220,7 +238,7 @@ def _render_client_card(client: Client, opps: list[Opportunity]) -> None:
                     f"({_chip(f'score {o.score}', '#fff', _score_color(o.score))})",
                     unsafe_allow_html=True,
                 )
-                if st.button("✉️ Draft outreach", key=f"client_draft_{client.id}_{o.id}"):
+                if st.button("✉️ Cold pitch", key=f"client_draft_{client.id}_{o.id}"):
                     _outreach_dialog(o.id)
 
         with st.expander("Contacts · notes"):
@@ -335,9 +353,52 @@ def main() -> None:
     c3.metric("🟢 New money", sum(o.radar == Radar.FIND for o in opps))
     c4.metric("🟡 Regulatory", sum(o.radar == Radar.REGULATORY_MONEY for o in opps))
 
-    tab_brief, tab_pipeline, tab_position, tab_clients, tab_notify = st.tabs(
-        ["📋 Daily Brief", "🗂 Pipeline", "🧩 Position Builder", "👥 Clients", "🔔 Notifications"]
+    tab_actions, tab_brief, tab_pipeline, tab_funds, tab_warm, tab_contacts, tab_pitch, tab_position, tab_clients, tab_notify = st.tabs(
+        [
+            "🎯 Today's Actions",
+            "📋 Daily Brief",
+            "🗂 Pipeline",
+            "💰 Fund Radar",
+            "🕸 Warm Path",
+            "📇 Contacts",
+            "✉️ Cold Pitch",
+            "🧩 Position Builder",
+            "👥 Clients",
+            "🔔 Notifications",
+        ]
     )
+
+    with tab_actions:
+        st.markdown(
+            "**Relationship Intelligence × Opportunity Radar.** "
+            "Ne 40 vijesti — samo **3–5 najboljih BD akcija** za danas, rangiranih: "
+            "`opportunity × mandate value × fit × urgency × relationship strength × access`."
+        )
+        actions = relationships.daily_bd_actions(opps)
+        if not actions:
+            st.info("Nema prioritetnih akcija za trenutne filtere.")
+        for a in actions:
+            with st.container(border=True):
+                st.markdown(
+                    f"### PRIORITY {a.priority} · score {a.score}"
+                )
+                st.markdown(f"**{a.title}**")
+                st.markdown(f"**Opportunity:** {a.opportunity}")
+                st.markdown(f"**Decision maker:** {a.decision_maker}")
+                st.markdown(f"**Warm path:** {a.warm_path_summary}")
+                st.caption(a.relationship_note)
+                st.success(f"**Suggested action:** {a.suggested_action}")
+                st.markdown(f"**Why Parivodic:** {a.why_parivodic}")
+                st.markdown(f"**Owner:** {a.owner}")
+                if a.draft:
+                    with st.expander("Suggested message"):
+                        st.text_area(
+                            "Draft",
+                            value=a.draft,
+                            height=180,
+                            key=f"daily_draft_{a.priority}",
+                            label_visibility="collapsed",
+                        )
 
     with tab_brief:
         if not opps:
@@ -362,8 +423,287 @@ def main() -> None:
                         st.caption(o.target_org or "target TBD")
                         _stage_selector(o, key_prefix="pipe")
                         if st.button("✉️", key=f"pipe_draft_{o.id}",
-                                     help="Draft & send outreach"):
+                                     help="Cold pitch"):
                             _outreach_dialog(o.id)
+
+    with tab_funds:
+        st.markdown(
+            "**Investment / Fund Radar.** Fond nije samo potencijalni klijent — "
+            "preko njegovog thesis-a nalazimo **kompanije koje raise-uju** i kojima "
+            "možemo ponuditi *Investment Readiness* **prije** runde. "
+            "Važi za VC, PE, strategic i DFI — ne samo startape."
+        )
+        funds = fund_radar.sample_funds()
+        fund_labels = {f"{f.name} ({f.investor_type.value})": f for f in funds}
+        chosen_f = st.selectbox("Investitor / fond", list(fund_labels.keys()), key="fund_sel")
+        fund = fund_labels[chosen_f]
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Fund size", fund.fund_size)
+        c2.metric("Ticket", fund.ticket)
+        c3.metric("Type", fund.investor_type.value)
+        c4.metric("Geo", fund.geography.split("/")[0].strip())
+        st.write(fund.thesis)
+        st.caption(
+            "Sectors: " + ", ".join(fund.sectors)
+            + " · Stages: " + ", ".join(s.value for s in fund.stages)
+        )
+
+        st.markdown("##### Matching companies (Investment Fit Score)")
+        fits = fund_radar.fits_for_fund(fund.id, min_score=60)
+        if not fits:
+            st.info("Nema dovoljno jakog fita za ovaj fond u demo setu.")
+        for fit in fits:
+            with st.container(border=True):
+                co = fit.company
+                st.markdown(
+                    f"**{co.name}** → {fund.name} fit: "
+                    f"<span style='background:#2e7d54;color:#fff;padding:2px 8px;"
+                    f"border-radius:10px;font-weight:700;'>{fit.score}/100</span>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    f"Stage: {co.stage.value} · Sector: {co.sector} · "
+                    f"Estimated raise: {co.estimated_raise}"
+                )
+                st.markdown("**Fundraising signals:**")
+                for s in co.fundraising_signals:
+                    st.markdown(f"- {s}")
+                st.caption(
+                    "Potential investors: "
+                    + ", ".join([fund.name] + fit.other_potential_investors)
+                )
+                st.caption(fit.rationale)
+
+        st.divider()
+        st.markdown("##### CONTACT NOW — Investment leads")
+        leads = [L for L in fund_radar.rank_leads(min_score=80) if L.fit.fund.id == fund.id]
+        if not leads:
+            leads = [L for L in fund_radar.rank_leads(min_score=75) if L.fit.fund.id == fund.id]
+        if not leads:
+            st.caption("Nema CONTACT NOW leada iznad praga za ovaj fond — vidi all-funds ispod.")
+        for L in leads[:5]:
+            fit = L.fit
+            with st.container(border=True):
+                st.markdown(f"### CONTACT NOW — {fit.company.name}")
+                st.markdown(
+                    f"**Razlog:** odgovara **{fit.fund.name}** thesisu i postoje signali "
+                    f"da trenutno raise-uje ({fit.company.stage.value})."
+                )
+                m1, m2, m3 = st.columns(3)
+                m1.metric(f"{fit.fund.name} fit", f"{fit.score}/100")
+                m2.metric("Opportunity", L.legal.label.split("+")[0].strip()[:22])
+                m3.metric("Priority", L.priority_score)
+                st.markdown(
+                    f"**Decision maker:** {fit.company.decision_maker} "
+                    f"({fit.company.decision_role})"
+                )
+                st.markdown(f"**Warm path:** {L.warm_path.path_type.value}")
+                if L.warm_path.chain:
+                    st.caption(" → ".join(L.warm_path.chain))
+                st.caption(L.warm_path.why)
+                st.success(f"**Suggested offer:** {L.legal.micro_offer}")
+                with st.expander("Legal workstreams (paid mandate)"):
+                    for w in L.legal.workstreams:
+                        st.markdown(f"- {w}")
+                with st.expander("Pitch"):
+                    st.text_input("Subject", value=L.pitch_subject, key=f"inv_subj_{fit.company.id}_{fit.fund.id}")
+                    st.text_area("Message", value=L.pitch_body, height=220, key=f"inv_body_{fit.company.id}_{fit.fund.id}")
+
+        with st.expander("Svi fondovi — top matches (demo)"):
+            for L in fund_radar.rank_leads(min_score=80)[:8]:
+                st.markdown(
+                    f"- **{L.fit.company.name}** × {L.fit.fund.name}: "
+                    f"fit {L.fit.score}/100 · {L.warm_path.path_type.value}"
+                )
+
+    with tab_warm:
+        st.markdown(
+            "**Obavezna faza prije cold outreach-a:** *Do we have a warm path?* "
+            "DIRECT · 1st-degree · intermediary · ili NO WARM PATH."
+        )
+        if not opps:
+            st.info("Nema leadova za filter.")
+        else:
+            labels = {f"[{o.score}] {o.title}": o for o in sorted(opps, key=lambda x: -x.score)}
+            chosen = st.selectbox("Lead", list(labels.keys()), key="warm_lead")
+            opp = labels[chosen]
+            path = relationships.find_warm_path(opp)
+
+            color = {
+                PathType.DIRECT: "#2e7d54",
+                PathType.FIRST_DEGREE: "#1264a3",
+                PathType.INTERMEDIARY: "#a1770a",
+                PathType.NONE: "#b3261e",
+            }[path.path_type]
+            st.markdown(
+                f"<div style='padding:12px 16px;border-left:5px solid {color};"
+                f"background:#f7f7f8;border-radius:8px;margin-bottom:12px;'>"
+                f"<b>{path.path_type.value}</b><br>{path.why}</div>",
+                unsafe_allow_html=True,
+            )
+            if path.chain:
+                st.markdown("**Chain:** " + " → ".join(f"`{x}`" for x in path.chain))
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"**Ask:** {path.ask}")
+                st.markdown(f"**Owner:** {path.suggested_owner}")
+                if path.intermediary:
+                    st.markdown(
+                        f"**Intermediary:** {path.intermediary.name} "
+                        f"({path.intermediary.company}) · strength "
+                        f"**{path.intermediary.strength}/100**"
+                    )
+                if path.decision_maker:
+                    st.markdown(
+                        f"**Decision maker:** {path.decision_maker.name} · "
+                        f"{path.decision_maker.role}"
+                    )
+            with c2:
+                if path.path_type == PathType.NONE:
+                    st.warning("Nema warm path → koristi Cold Pitch (mikro-isporuka).")
+                    if st.button("Otvori Cold Pitch", key="warm_to_cold"):
+                        _outreach_dialog(opp.id)
+                elif path.draft_message:
+                    st.text_area("Suggested message", value=path.draft_message, height=220)
+
+            st.divider()
+            st.markdown("##### Why-now triggers (existing contacts)")
+            for t in relationships.contact_triggers():
+                with st.container(border=True):
+                    st.markdown(f"**{t.score}/100** · {t.headline}")
+                    st.write(t.why_now)
+                    st.caption("Likely needs: " + ", ".join(t.likely_needs))
+                    st.markdown(f"→ **{t.suggested_owner}** today")
+
+    with tab_contacts:
+        st.markdown(
+            "**Master Contact Database** — jedan profil po osobi (dedupe: vizit karta + "
+            "mailbox + CRM). Relationship strength 0–100: recency, učestalost, da li je "
+            "postojao mandate. Samo zakonito dostupni podaci."
+        )
+        contacts = relationships.sample_contacts()
+        q = st.text_input("Search", placeholder="ime, kompanija, industrija…", key="contact_q")
+        for c in contacts:
+            blob = f"{c.name} {c.company} {c.role} {c.industry} {c.known_by}".lower()
+            if q and q.lower() not in blob:
+                continue
+            with st.container(border=True):
+                top, side = st.columns([4, 1])
+                with top:
+                    st.markdown(f"#### {c.name}")
+                    st.markdown(f"**{c.role}** · {c.company}")
+                    st.caption(
+                        f"{c.country} · {c.industry} · origin: {c.origin}"
+                        + (f" · known by **{c.known_by}**" if c.known_by else "")
+                    )
+                    if c.notes:
+                        st.caption(c.notes)
+                with side:
+                    st.metric("Strength", f"{c.strength}")
+                    st.caption(f"{c.email_exchanges} emails")
+                    st.caption(f"Last: {c.last_contact}")
+                    if c.was_client:
+                        st.caption("✅ former client")
+                with st.expander("Details"):
+                    st.write(f"Email: `{c.email or '—'}`")
+                    st.write(f"Phone: `{c.phone or '—'}`")
+                    if c.linkedin:
+                        st.markdown(f"[Public LinkedIn]({c.linkedin})")
+
+        st.divider()
+        st.markdown("##### Relationship graph (demo edges)")
+        edges = relationships.sample_edges()
+        idx = {c.id: c for c in contacts}
+
+        def _node(cid: str) -> str:
+            if cid == "parivodic":
+                return "Parivodic Lawyers"
+            return idx[cid].name if cid in idx else cid
+
+        for e in edges:
+            st.markdown(f"- **{_node(e.source_id)}** → **{_node(e.target_id)}** _{e.relation}_")
+
+    with tab_pitch:
+        st.markdown(
+            "**Cold pitch playbook.** Prvo vrijednost, zatim razgovor, tek onda saradnja. "
+            "Formula: *poslovni signal → značaj za kompaniju → ključna pitanja → "
+            "konkretna ekspertiza → besplatna mikro-isporuka.* "
+            "Prva poruka **ne** traži sastanak."
+        )
+        contact_now = sorted(opps, key=lambda o: o.score, reverse=True)
+        if not contact_now:
+            st.info("No leads for the current filters.")
+        else:
+            labels = {f"[{o.score}] {o.title}": o for o in contact_now}
+            chosen = st.selectbox(
+                "Lead",
+                options=list(labels.keys()),
+                key="cold_pitch_lead",
+            )
+            opp = labels[chosen]
+            lang = st.radio(
+                "Language",
+                options=["sr", "en"],
+                format_func=lambda x: "Srpski" if x == "sr" else "English",
+                horizontal=True,
+                key="cold_pitch_lang",
+            )
+            pitch = cold_pitch.build_cold_pitch(opp, lang=lang)
+
+            label, fg, bg = _RADAR_STYLE[opp.radar]
+            st.markdown(
+                f"{_chip(label, fg, bg)} &nbsp; "
+                f"{_chip(f'score {opp.score}', '#fff', _score_color(opp.score))} &nbsp; "
+                f"**{opp.target_org or opp.title}**",
+                unsafe_allow_html=True,
+            )
+
+            a, b = st.columns(2)
+            with a:
+                st.markdown("##### A. Poslovni signal")
+                st.write(pitch.signal)
+                st.markdown("##### B. Značaj za kompaniju")
+                st.write(pitch.relevance)
+                st.markdown("##### Ključna pitanja")
+                for q in pitch.key_questions:
+                    st.markdown(f"- {q}")
+            with b:
+                st.markdown("##### C. Naša ekspertiza")
+                st.write(pitch.expertise)
+                st.markdown("##### D. Mikro-isporuka")
+                st.success(pitch.micro_delivery)
+                st.markdown("##### Završetak")
+                st.write(pitch.closing_line)
+                st.caption(f"{pitch.word_count} riječi · cilj ~100–150")
+                if pitch.passes_rules:
+                    st.success("✅ " + pitch.rule_notes[0])
+                else:
+                    for n in pitch.rule_notes:
+                        st.warning(n)
+
+            st.divider()
+            st.markdown("#### Generisana poruka")
+            st.text_input("Subject", value=pitch.subject, key="cold_subj_view")
+            st.text_area("Message", value=pitch.body, height=260, key="cold_body_view")
+            st.caption(f"To: {outreach.demo_recipient(opp)}")
+            if st.button("✉️ Open send dialog", key="cold_open_send"):
+                _outreach_dialog(opp.id)
+
+            with st.expander("Šta se ne smije (banned phrases)"):
+                st.caption(
+                    "Poruka se automatski odbija ako sadrži: traženje sastanka, "
+                    "„javite nam se ako ste zainteresovani“, „sveobuhvatnu pravnu podršku“, "
+                    "„vodeća kancelarija“, calendar link, itd."
+                )
+                st.code("\n".join(cold_pitch.BANNED_PHRASES[:8]) + "\n…")
+
+            with st.expander("Logika daljeg kontakta"):
+                st.markdown(
+                    "1. Ako prihvate materijal → pošalji ga **bez** insistiranja na sastanak.\n"
+                    "2. Nakon slanja → jedno konkretno pitanje o njihovoj situaciji.\n"
+                    "3. Sastanak tek kada pokažu interes — kao nastavak stručne razmjene."
+                )
 
     with tab_position:
         st.markdown(
